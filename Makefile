@@ -2,7 +2,8 @@ CC = clang
 CFLAGS += -Werror \
 		  -Wpedantic \
 		  -framework AppKit \
-		  -framework QuartzCore
+		  -framework QuartzCore \
+		  -fobjc-arc
 
 APP_TARGET = RemoteRendered.app
 RENDERER_TARGET = $(APP_TARGET)/Contents/XPCServices/Renderer.xpc

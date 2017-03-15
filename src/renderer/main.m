@@ -11,19 +11,32 @@ static void handle_connection(xpc_connection_t peer) {
 	view.layer.opaque = YES;
 	view.layer.backgroundColor = NSColor.blueColor.CGColor;
 
-	CALayer* colorLayer = [CALayer layer];
-	colorLayer.bounds = rect;
-	colorLayer.backgroundColor = NSColor.blueColor.CGColor;
+	NSButton* button = [NSButton new];
+	button.title = @"Legit?";
+	button.bezelStyle = NSRoundedBezelStyle;
+	[button sizeToFit];
+	[button setNeedsDisplay:YES];
+	[view addSubview:button];
 
 	CAContext* context = [CAContext contextWithCGSConnection:CGSMainConnectionID()
-													 options:@{ @"kCAContextCIFilterBehavior": @"ignore" }];
+													 options:@{ kCAContextCIFilterBehavior: @"ignore" }];
+	context.layer = view.layer;
 
-	xpc_connection_set_event_handler(peer, ^(xpc_object_t event __unused) {
+	[view layoutSubtreeIfNeeded];
+	[CATransaction flush];
+
+	xpc_connection_set_event_handler(peer, ^(xpc_object_t event) {
+		if (event == XPC_ERROR_CONNECTION_INVALID) {
+			xpc_transaction_end();
+			return;
+		}
+
 		xpc_connection_send_message(peer, xpc_dictionary_create((const char*[]){
 			"contextID",
 		}, (xpc_object_t[]){
 			xpc_uint64_create(context.contextId),
 		}, 1));
+		xpc_transaction_begin();
 	});
 
 	xpc_connection_resume(peer);
