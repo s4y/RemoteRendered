@@ -34,3 +34,7 @@ extern NSString * const kCAContextCIFilterBehavior;
 @interface CALayerHost : CALayer
 @property () uint32_t contextId;
 @end
+
+@interface CALayer ()
+@property(readonly) CAContext* context;
+@end

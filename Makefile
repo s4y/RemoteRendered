@@ -3,7 +3,8 @@ CFLAGS += -Werror \
 		  -Wpedantic \
 		  -framework AppKit \
 		  -framework QuartzCore \
-		  -fobjc-arc
+		  -fobjc-arc \
+		  -g
 
 APP_TARGET = RemoteRendered.app
 RENDERER_TARGET = $(APP_TARGET)/Contents/XPCServices/Renderer.xpc
