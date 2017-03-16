@@ -43,13 +43,16 @@
 
 - (void)setSize:(NSSize)size scaleFactor:(CGFloat)scaleFactor fence:(NSCGSFence*)fence cb:(void(^)())cb {
 	NSLog(@"got fence: %@, port: %d, valid: %d", fence, fence.port, fence.isValid);
-	mach_port_rights_t srights = -1;
-	mach_port_get_srights(mach_task_self(), fence.port, &srights);
-	NSLog(@"port has send rights: %d", srights);
-	[_context setFencePort:fence.port];
-	_view.frameSize = size;
-	[CATransaction flush];
+  mach_port_mod_refs(mach_task_self(), fence.port, MACH_PORT_RIGHT_SEND, -10);
 	cb();
+	return;
+	[_context setFencePort:fence.port];
+	[fence invalidate];
+	NSLog(@"invalidated fence: %@, port: %d, valid: %d", fence, fence.port, fence.isValid);
+	_view.frameSize = size;
+	NSLog(@"cbcbcb");
+	[CATransaction flush];
+	NSLog(@"flished");
 }
 
 @end
@@ -67,27 +70,6 @@
 }
 
 @end
-
-#if 0
-static void handle_connection(xpc_connection_t peer) {
-
-	xpc_connection_set_event_handler(peer, ^(xpc_object_t event) {
-		if (event == XPC_ERROR_CONNECTION_INVALID) {
-			xpc_transaction_end();
-			return;
-		}
-
-		xpc_connection_send_message(peer, xpc_dictionary_create((const char*[]){
-			"contextID",
-		}, (xpc_object_t[]){
-			xpc_uint64_create(context.contextId),
-		}, 1));
-		xpc_transaction_begin();
-	});
-
-	xpc_connection_resume(peer);
-}
-#endif
 
 #import <objc/runtime.h>
 
