@@ -5,24 +5,6 @@
 #import "../shared/renderer.h"
 #import "../spi/QuartzCoreSPI.h"
 
-@interface OS_OBJECT_CLASS(xpc_object)
-@end
-
-@interface OS_OBJECT_CLASS(xpc_object)(SecureCoding)<NSSecureCoding>
-@end
-
-@implementation OS_OBJECT_CLASS(xpc_object)(SecureCoding)
-+ (BOOL)supportsSecureCoding {
-  return YES;
-}
-
-- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder{
-	 return [(NSXPCDecoder*)aDecoder decodeXPCObjectOfType:(struct _xpc_type_s *)&_xpc_type_mach_send forKey:@"xpc"];
-}
-
-- (void)encodeWithCoder:(NSCoder *)aCoder {}
-@end
-
 @interface RendererImpl : NSObject<Renderer>
 @end
 
@@ -59,10 +41,12 @@
   cb(_context.contextId);
 }
 
-- (void)setSize:(NSSize)size scaleFactor:(CGFloat)scaleFactor fence:(xpc_object_t)xfence cb:(void(^)())cb {
-	mach_port_t fence = xpc_mach_send_get_right(xfence);
-	[_context setFencePort:fence];
-	// mach_port_deallocate(mach_task_self(), fence);
+- (void)setSize:(NSSize)size scaleFactor:(CGFloat)scaleFactor fence:(NSCGSFence*)fence cb:(void(^)())cb {
+	NSLog(@"got fence: %@, port: %d, valid: %d", fence, fence.port, fence.isValid);
+	mach_port_rights_t srights = -1;
+	mach_port_get_srights(mach_task_self(), fence.port, &srights);
+	NSLog(@"port has send rights: %d", srights);
+	[_context setFencePort:fence.port];
 	_view.frameSize = size;
 	[CATransaction flush];
 	cb();
@@ -105,7 +89,10 @@ static void handle_connection(xpc_connection_t peer) {
 }
 #endif
 
+#import <objc/runtime.h>
+
 int main() {
+  class_addProtocol(NSClassFromString(@"NSCGSFence"), @protocol(NSSecureCoding));
 	NSXPCListener* listener = [NSXPCListener serviceListener];
 	ListenerDelegate* listenerDelegate = [ListenerDelegate new];
 	listener.delegate = listenerDelegate;

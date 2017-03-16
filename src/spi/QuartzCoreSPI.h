@@ -1,26 +1,21 @@
 #import <QuartzCore/QuartzCore.h>
 
-XPC_EXPORT
-XPC_TYPE(_xpc_type_mach_send);
+@interface NSCGSFence : NSObject <NSCoding, NSCopying>
 
-XPC_RETURNS_RETAINED XPC_WARN_RESULT
-xpc_object_t
-xpc_mach_send_create(mach_port_t value);
++ (BOOL)supportsSecureCoding;
++ (id)fence;
+@property(readonly) unsigned int port;
+@property(readonly, getter=isValid) BOOL valid;
+- (void)invalidate;
+- (void)set;
+- (void)dealloc;
+- (void)encodeWithCoder:(id)arg1;
+- (id)initWithCoder:(id)arg1;
+- (id)copyWithZone:(struct _NSZone *)arg1;
+- (id)initWithPort:(unsigned int)arg1;
+- (id)init;
 
-mach_port_t
-xpc_mach_send_get_right(xpc_object_t xmach_send);
-
-@interface NSXPCCoder : NSCoder
 @end
-
-@interface NSXPCEncoder : NSXPCCoder
-- (void)encodeXPCObject:(xpc_object_t)obj forKey:(NSString*)key;
-@end
-
-@interface NSXPCDecoder : NSXPCCoder
-- (id)decodeXPCObjectOfType:(struct _xpc_type_s *)arg1 forKey:(id)arg2;
-@end
-
 
 typedef uint32_t CGSConnectionID;
 CGSConnectionID CGSMainConnectionID(void);
@@ -29,6 +24,7 @@ extern NSString * const kCAContextCIFilterBehavior;
 
 @interface CATransaction()
 + (void)synchronize;
++ (CATransaction*)currentTransaction;
 @end
 
 @interface CAContext : NSObject
