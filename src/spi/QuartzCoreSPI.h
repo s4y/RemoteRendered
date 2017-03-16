@@ -1,9 +1,35 @@
 #import <QuartzCore/QuartzCore.h>
 
+XPC_EXPORT
+XPC_TYPE(_xpc_type_mach_send);
+
+XPC_RETURNS_RETAINED XPC_WARN_RESULT
+xpc_object_t
+xpc_mach_send_create(mach_port_t value);
+
+mach_port_t
+xpc_mach_send_get_right(xpc_object_t xmach_send);
+
+@interface NSXPCCoder : NSCoder
+@end
+
+@interface NSXPCEncoder : NSXPCCoder
+- (void)encodeXPCObject:(xpc_object_t)obj forKey:(NSString*)key;
+@end
+
+@interface NSXPCDecoder : NSXPCCoder
+- (id)decodeXPCObjectOfType:(struct _xpc_type_s *)arg1 forKey:(id)arg2;
+@end
+
+
 typedef uint32_t CGSConnectionID;
 CGSConnectionID CGSMainConnectionID(void);
 
 extern NSString * const kCAContextCIFilterBehavior;
+
+@interface CATransaction()
++ (void)synchronize;
+@end
 
 @interface CAContext : NSObject
 @end
@@ -33,4 +59,8 @@ extern NSString * const kCAContextCIFilterBehavior;
 
 @interface CALayerHost : CALayer
 @property () uint32_t contextId;
+@end
+
+@interface CALayer ()
+- (CAContext *)context;
 @end

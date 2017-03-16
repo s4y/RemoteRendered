@@ -2,28 +2,90 @@
 #include <AppKit/AppKit.h>
 #include <QuartzCore/QuartzCore.h>
 
+#import "../shared/renderer.h"
 #import "../spi/QuartzCoreSPI.h"
 
-static void handle_connection(xpc_connection_t peer) {
-	CGRect rect = CGRectMake(0, 0, 100, 100);
-	NSView* view = [[NSView alloc] initWithFrame:rect];
-	view.wantsLayer = YES;
-	view.layer.opaque = YES;
-	view.layer.backgroundColor = NSColor.blueColor.CGColor;
+@interface OS_OBJECT_CLASS(xpc_object)
+@end
 
-	NSButton* button = [NSButton new];
-	button.title = @"Legit?";
-	button.bezelStyle = NSRoundedBezelStyle;
-	[button sizeToFit];
-	[button setNeedsDisplay:YES];
-	[view addSubview:button];
+@interface OS_OBJECT_CLASS(xpc_object)(SecureCoding)<NSSecureCoding>
+@end
 
-	CAContext* context = [CAContext contextWithCGSConnection:CGSMainConnectionID()
-													 options:@{ kCAContextCIFilterBehavior: @"ignore" }];
-	context.layer = view.layer;
+@implementation OS_OBJECT_CLASS(xpc_object)(SecureCoding)
++ (BOOL)supportsSecureCoding {
+  return YES;
+}
 
-	[view layoutSubtreeIfNeeded];
+- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder{
+	 return [(NSXPCDecoder*)aDecoder decodeXPCObjectOfType:(struct _xpc_type_s *)&_xpc_type_mach_send forKey:@"xpc"];
+}
+
+- (void)encodeWithCoder:(NSCoder *)aCoder {}
+@end
+
+@interface RendererImpl : NSObject<Renderer>
+@end
+
+@implementation RendererImpl {
+	CAContext* _context;
+	NSView* _view;
+}
+
+- (instancetype)init {
+	if ((self = [super init])) {
+		_view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+		_view.wantsLayer = YES;
+		_view.layer.opaque = YES;
+		_view.layer.backgroundColor = NSColor.blueColor.CGColor;
+
+		NSButton* button = [NSButton new];
+		button.title = @"Legit?";
+		button.bezelStyle = NSRoundedBezelStyle;
+		[button sizeToFit];
+		[_view addSubview:button];
+
+		_context = [CAContext contextWithCGSConnection:CGSMainConnectionID() options:@{
+			kCAContextCIFilterBehavior: @"ignore",
+		}];
+		_context.layer = _view.layer;
+
+		[_view layoutSubtreeIfNeeded];
+		[CATransaction flush];
+  }
+  return self;
+}
+
+- (void)getContextId:(void(^)(uint32_t))cb {
+  cb(_context.contextId);
+}
+
+- (void)setSize:(NSSize)size scaleFactor:(CGFloat)scaleFactor fence:(xpc_object_t)xfence cb:(void(^)())cb {
+	mach_port_t fence = xpc_mach_send_get_right(xfence);
+	[_context setFencePort:fence];
+	// mach_port_deallocate(mach_task_self(), fence);
+	_view.frameSize = size;
 	[CATransaction flush];
+	cb();
+}
+
+@end
+
+@interface ListenerDelegate : NSObject<NSXPCListenerDelegate>
+@end
+
+@implementation ListenerDelegate
+
+- (BOOL)listener:(NSXPCListener * __unused)listener shouldAcceptNewConnection:(NSXPCConnection *)connection {
+	connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(Renderer)];
+  connection.exportedObject = [RendererImpl new];
+	[connection resume];
+  return YES;
+}
+
+@end
+
+#if 0
+static void handle_connection(xpc_connection_t peer) {
 
 	xpc_connection_set_event_handler(peer, ^(xpc_object_t event) {
 		if (event == XPC_ERROR_CONNECTION_INVALID) {
@@ -41,7 +103,11 @@ static void handle_connection(xpc_connection_t peer) {
 
 	xpc_connection_resume(peer);
 }
+#endif
 
 int main() {
-	xpc_main(handle_connection);
+	NSXPCListener* listener = [NSXPCListener serviceListener];
+	ListenerDelegate* listenerDelegate = [ListenerDelegate new];
+	listener.delegate = listenerDelegate;
+	[listener resume];
 }
