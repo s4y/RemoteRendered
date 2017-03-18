@@ -1,9 +1,24 @@
-#include <xpc/xpc.h>
 #include <AppKit/AppKit.h>
 #include <QuartzCore/QuartzCore.h>
 
-#import "../spi/QuartzCoreSPI.h"
+#import "../spi.h"
 
+void XPCReply(xpc_connection_t conn, xpc_object_t m, void(^f)(xpc_object_t)) {
+	xpc_object_t reply = xpc_dictionary_create_reply(m);
+	f(reply);
+	xpc_connection_send_message(conn, reply);
+}
+
+NSButton* MakeButton(NSString* title) {
+	NSButton* button = [NSButton new];
+	button.translatesAutoresizingMaskIntoConstraints = NO;
+	button.title = title;
+	button.bezelStyle = NSRoundedBezelStyle;
+	[button sizeToFit];
+	return button;
+}
+
+void xpc_dictionary_set_mach_send(xpc_object_t, const char*, mach_port_t);
 mach_port_t xpc_dictionary_copy_mach_send(xpc_object_t, const char*);
 
 static void handle_connection(xpc_connection_t peer) {
@@ -12,51 +27,70 @@ static void handle_connection(xpc_connection_t peer) {
 	view.layer.opaque = YES;
 	view.layer.backgroundColor = NSColor.blueColor.CGColor;
 
-	NSButton* button = [NSButton new];
-	button.title = @"Legit?";
-	button.bezelStyle = NSRoundedBezelStyle;
-	[button sizeToFit];
-	[button setNeedsDisplay:YES];
-	[view addSubview:button];
+	{
+		NSButton* button = MakeButton(@"A");
+		[view addSubview:button];
+		[button.topAnchor constraintEqualToAnchor:view.topAnchor].active = YES;
+		[button.leadingAnchor constraintEqualToAnchor:view.leadingAnchor].active = YES;
+	}
+
+	{
+		NSButton* button = MakeButton(@"B");
+		[view addSubview:button];
+		[button.topAnchor constraintEqualToAnchor:view.topAnchor].active = YES;
+		[button.trailingAnchor constraintEqualToAnchor:view.trailingAnchor].active = YES;
+	}
+
+	{
+		NSButton* button = MakeButton(@"C");
+		[view addSubview:button];
+		[button.bottomAnchor constraintEqualToAnchor:view.bottomAnchor].active = YES;
+		[button.leadingAnchor constraintEqualToAnchor:view.leadingAnchor].active = YES;
+	}
+
+	{
+		NSButton* button = MakeButton(@"D");
+		[view addSubview:button];
+		[button.bottomAnchor constraintEqualToAnchor:view.bottomAnchor].active = YES;
+		[button.trailingAnchor constraintEqualToAnchor:view.trailingAnchor].active = YES;
+	}
 
 	CAContext* context = [CAContext contextWithCGSConnection:CGSMainConnectionID()
 													 options:@{ kCAContextCIFilterBehavior: @"ignore" }];
 	context.layer = view.layer;
 
-	[view layoutSubtreeIfNeeded];
 	[CATransaction flush];
 
+	xpc_connection_set_target_queue(peer, dispatch_get_main_queue());
 	xpc_connection_set_event_handler(peer, ^(xpc_object_t event) {
+		// Strong reference for ARC.
+		(void)context;
+
 		if (event == XPC_ERROR_CONNECTION_INVALID) {
 			return;
 		}
 
-		NSLog(@"incoming: %@", event);
+		if (xpc_dictionary_get_bool(event, "getContextId")) {
+			XPCReply(peer, event, ^(xpc_object_t m) {
+				xpc_dictionary_set_uint64(m, "contextId", context.contextId);
+			});
+			return;
+		}
 
 		CGFloat width = xpc_dictionary_get_double(event, "width");
 		CGFloat height = xpc_dictionary_get_double(event, "height");
-		if (width && height) {
+		if (width > 0 && height > 0) {
 			[view setFrameSize:NSMakeSize(width, height)];
 		}
 
-		mach_port_t fence = xpc_dictionary_copy_mach_send(event, "fence");
-		NSLog(@"we get fence: %d", fence);
-		if (fence != MACH_PORT_NULL) {
-			struct mach_port_status status = {0};
-			mach_msg_type_number_t count = MACH_PORT_RECEIVE_STATUS_COUNT;
-			mach_port_get_attributes(mach_task_self(), fence, MACH_PORT_RECEIVE_STATUS, (mach_port_info_t)&status, &count);
-			NSLog(@"srights: %d", status.mps_srights);
-			NSLog(@"set fence to %d", fence);
-			[view.layer.context setFencePort:fence];
-		}
+		XPCReply(peer, event, ^(xpc_object_t m) {
+			mach_port_t fence = [context createFencePort];
+			xpc_dictionary_set_mach_send(m, "fence", fence);
+			mach_port_deallocate(mach_task_self(), fence);
+		});
 
-		xpc_connection_send_message(peer, xpc_dictionary_create((const char*[]){
-			"contextID",
-		}, (xpc_object_t[]){
-			xpc_uint64_create(context.contextId),
-		}, 1));
-
-		[CATransaction flush];
+		[view layoutSubtreeIfNeeded];
+		[view displayIfNeeded];
 	});
 
 	xpc_connection_resume(peer);
