@@ -29,5 +29,6 @@ typedef enum {
 
 @interface CATransaction ()
 + (void)addCommitHandler:(void(^)(void))block forPhase:(CATransactionPhase)phase;
++ (unsigned int)generateSeed;
 @end
 

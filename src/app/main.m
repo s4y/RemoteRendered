@@ -62,6 +62,10 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		return;
 	}
 
+	mach_port_t fence;
+	mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &fence);
+	mach_port_insert_right(mach_task_self(), fence, fence, MACH_MSG_TYPE_MAKE_SEND);
+
 	const NSSize size = self.frame.size;
 	xpc_object_t reply = xpc_connection_send_message_with_reply_sync(_connection, XPCDict(^(xpc_object_t m) {
 		xpc_dictionary_set_double(m, "width", size.width);
@@ -72,7 +76,7 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		// these lines and adding usleep(20000) near the bottom of the
 		// renderer's event handler effectively demonstrates the failure mode
 		// without this fence. CA fences have a ~1s timeout.
-		mach_port_t fence = [context createFencePort];
+		//mach_port_t fence = [context createFencePort];
 		xpc_dictionary_set_mach_send(m, "fence", fence);
 		mach_port_deallocate(mach_task_self(), fence);
 	}));
@@ -95,7 +99,16 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		// this API on my part, but it's worth noting that WebKit uses
 		// -setFence:, which explains why Safari window resizing is so glitchy,
 		// especially from the left edge.
+		//mach_port_deallocate(mach_task_self(), remote_fence);
+		//mach_port_deallocate(mach_task_self(), fence);
+		NSLog(@"%d -> PostCommit", [CATransaction generateSeed]);
+		mach_port_t previous;
+		mach_port_request_notification(mach_task_self(), fence, MACH_NOTIFY_NO_SENDERS, 0, fence, MACH_MSG_TYPE_MAKE_SEND_ONCE, &previous);
 		mach_port_deallocate(mach_task_self(), remote_fence);
+		mach_no_senders_notification_t msg = {0};
+		mach_msg(&msg.not_header, MACH_RCV_MSG, 0, sizeof(msg), fence, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+		mach_port_destroy(mach_task_self(), fence);
+		NSLog(@"%d <- PostCommit", [CATransaction generateSeed]);
 	} forPhase:kCATransactionPhasePostCommit];
 }
 
