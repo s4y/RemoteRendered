@@ -11,23 +11,6 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 	return message;
 }
 
-// Sends an XPC message, then calls the reply handler in the PreLayout phase of
-// the current CATransaction. xpc_connection_send_message_with_reply_sync()
-// would also work, but this way the app blocks only if the reply hasn't
-// arrived by commit time.
-static void SendXPCMessageWithReplyBlockingCATransaction(xpc_connection_t conn, xpc_object_t message, void(^handler)(xpc_object_t)) {
-	dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-	__block xpc_object_t reply;
-	xpc_connection_send_message_with_reply(conn, message, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^(xpc_object_t reply_in) {
-		reply = reply_in;
-		dispatch_semaphore_signal(sema);
-	});
-	[CATransaction addCommitHandler:^{
-		dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-		handler(reply);
-	} forPhase:kCATransactionPhasePreLayout];
-}
-
 @interface RendererView : NSView
 @end
 
@@ -50,14 +33,15 @@ static void SendXPCMessageWithReplyBlockingCATransaction(xpc_connection_t conn, 
 - (CALayer*)makeBackingLayer {
 	CALayerHost* layerHost = [[CALayerHost alloc] init];
 
-	// Blocking the CATransaction from here and updateGeometry means that the
-	// remote view is never shown in an intermediate state, and avoids the
-	// MacViews workaround of making windows invisible until first paint.
-	SendXPCMessageWithReplyBlockingCATransaction(_connection, XPCDict(^(xpc_object_t m) {
+	// Using synchronous XPC here and in updateGeometry means that the remote
+	// view is never shown in an intermediate state, and avoids the MacViews
+	// workaround of making windows invisible until first paint. In both cases,
+	// the renderer should do minimal work before it replies — the slow stuff
+	// uses CA fences which block as late as possible.
+	xpc_object_t reply = xpc_connection_send_message_with_reply_sync(_connection, XPCDict(^(xpc_object_t m) {
 		xpc_dictionary_set_bool(m, "getContextId", true);
-	}), ^(xpc_object_t reply){
-		layerHost.contextId = xpc_dictionary_get_uint64(reply, "contextId");
-	});
+	}));
+	layerHost.contextId = xpc_dictionary_get_uint64(reply, "contextId");
 	return layerHost;
 }
 
@@ -74,43 +58,45 @@ static void SendXPCMessageWithReplyBlockingCATransaction(xpc_connection_t conn, 
 	CAContext* context = self.layer.context;
 
 	// The view will only have a context if it's in a window.
-	if (context == nil) { return; }
+	if (context == nil) {
+		return;
+	}
 
-	SendXPCMessageWithReplyBlockingCATransaction(_connection, XPCDict(^(xpc_object_t m) {
-		NSSize size = self.frame.size;
+	const NSSize size = self.frame.size;
+	xpc_object_t reply = xpc_connection_send_message_with_reply_sync(_connection, XPCDict(^(xpc_object_t m) {
 		xpc_dictionary_set_double(m, "width", size.width);
 		xpc_dictionary_set_double(m, "height", size.height);
 
-		// This fence lets the renderer delay the app's commit. In this
-		// example, the renderer is doing very little layout and won't need to,
-		// but commenting out these lines and adding usleep(20000) near the
-		// bottom of the renderer's event handler effectively demonstrates the
-		// failure mode without it. CA fences have a ~1s timeout.
+		// This fence lets the renderer delay the app's commit. The renderer is
+		// doing very little layout work in this example, but commenting out
+		// these lines and adding usleep(20000) near the bottom of the
+		// renderer's event handler effectively demonstrates the failure mode
+		// without this fence. CA fences have a ~1s timeout.
 		mach_port_t fence = [context createFencePort];
 		xpc_dictionary_set_mach_send(m, "fence", fence);
 		mach_port_deallocate(mach_task_self(), fence);
-	}), ^(xpc_object_t reply){
-		mach_port_t remote_fence = xpc_dictionary_copy_mach_send(reply, "fence");
+	}));
 
-		[CATransaction addCommitHandler:^{
-			// When this PostCommit handler runs, the app has a fence with the
-			// window server: if you pause inside it in a debugger, you'll see
-			// the changes flush to the screen after the ~1s timeout. The
-			// renderer's CA fence is signaled here, which lets it update in
-			// sync with the app. Signal it any earlier and displays a frame
-			// *ahead* of the app. Signal it later, it's a frame behind. This
-			// took the longest to figure out, because CAContext already has a
-			// -setFence: method that can accept a fence from another process.
-			// But, fences set that way are signaled in the PreCommit phase,
-			// so the remote content updates ahead of the rest of the app.
-			//
-			// I'm not sure if that's a bug or just incomplete understanding of
-			// this API, but it's worth noting that WebKit uses -setFence:,
-			// which explains why Safari (and Chrome?) window resizing,
-			// especially from the left edge, is so glitchy.
-			mach_port_deallocate(mach_task_self(), remote_fence);
-		} forPhase:kCATransactionPhasePostCommit];
-	});
+	mach_port_t remote_fence = xpc_dictionary_copy_mach_send(reply, "fence");
+
+	[CATransaction addCommitHandler:^{
+		// When this PostCommit handler runs, the app has a fence with the
+		// window server (if you pause here in a debugger, you'll see the
+		// changes flush to the screen after the ~1s timeout). The renderer's
+		// CA fence is signaled here, and it updates in sync with the main
+		// process. Signal it earlier, it displays a frame *before* the main
+		// process. Signal it later, it'll be a frame behind. This took the
+		// longest to figure out, because CAContext has a -setFence: method
+		// that can accept a fence from another process, but it signals those
+		// fences just before the PreCommit phase, causing the remote content
+		// to update ahead of the main process.
+		//
+		// I'm not sure if that's a bug or just incomplete understanding of
+		// this API on my part, but it's worth noting that WebKit uses
+		// -setFence:, which explains why Safari window resizing is so glitchy,
+		// especially from the left edge.
+		mach_port_deallocate(mach_task_self(), remote_fence);
+	} forPhase:kCATransactionPhasePostCommit];
 }
 
 @end
