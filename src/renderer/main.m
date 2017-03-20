@@ -1,9 +1,8 @@
 #include <AppKit/AppKit.h>
 
+#import "../shared/fence.h"
 #import "../spi/QuartzCore.h"
 #import "../spi/xpc.h"
-
-#define DEMO_MODE FISH
 
 static const CGFloat kStandardPadding = 8;
 
@@ -75,7 +74,7 @@ static void handle_connection(xpc_connection_t peer) {
 		}
 
 		XPCReply(peer, event, ^(xpc_object_t m) {
-			mach_port_t fence = [context createFencePort];
+			mach_port_t fence = FenceForCATransactionPhase(kCATransactionPhasePreCommit);
 			xpc_dictionary_set_mach_send(m, "fence", fence);
 			mach_port_deallocate(mach_task_self(), fence);
 		});
@@ -84,7 +83,7 @@ static void handle_connection(xpc_connection_t peer) {
 
 		[CATransaction addCommitHandler:^{
 			mach_port_deallocate(mach_task_self(), remote_fence);
-		} forPhase:kCATransactionPhasePreLayout];
+		} forPhase:kCATransactionPhasePostCommit];
 
 		[view layoutSubtreeIfNeeded];
 		[view displayIfNeeded];

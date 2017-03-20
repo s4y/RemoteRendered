@@ -1,5 +1,6 @@
 #include <AppKit/AppKit.h>
 
+#import "../shared/fence.h"
 #import "../spi/QuartzCore.h"
 #import "../spi/xpc.h"
 
@@ -72,7 +73,7 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		// these lines and adding usleep(20000) near the bottom of the
 		// renderer's event handler effectively demonstrates the failure mode
 		// without this fence. CA fences have a ~1s timeout.
-		mach_port_t fence = [context createFencePort];
+		mach_port_t fence = FenceForCATransactionPhase(kCATransactionPhasePostCommit);
 		xpc_dictionary_set_mach_send(m, "fence", fence);
 		mach_port_deallocate(mach_task_self(), fence);
 	}));
