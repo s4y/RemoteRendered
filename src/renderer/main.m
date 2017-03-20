@@ -74,32 +74,17 @@ static void handle_connection(xpc_connection_t peer) {
 			[view setFrameSize:NSMakeSize(width, height)];
 		}
 
-		mach_port_t fence;
-		mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &fence);
-		mach_port_insert_right(mach_task_self(), fence, fence, MACH_MSG_TYPE_MAKE_SEND);
-
-		XPCReply(peer, event, ^(xpc_object_t m) {
-			xpc_dictionary_set_mach_send(m, "fence", fence);
-			mach_port_deallocate(mach_task_self(), fence);
-		});
-
-		mach_port_t remote_fence = xpc_dictionary_copy_mach_send(event, "fence");
-
+		__block xpc_object_t preCommitReply;
+		NSLog(@"A");
 		[CATransaction addCommitHandler:^{
-			NSLog(@"%d -> PreLayout", [CATransaction generateSeed]);
-			mach_port_t previous;
-			mach_port_request_notification(mach_task_self(), fence, MACH_NOTIFY_NO_SENDERS, 0, fence, MACH_MSG_TYPE_MAKE_SEND_ONCE, &previous);
-			mach_no_senders_notification_t msg = {0};
-			mach_msg(&msg.not_header, MACH_RCV_MSG, 0, sizeof(msg), fence, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
-			mach_port_destroy(mach_task_self(), fence);
-			NSLog(@"%d <- PreLayout", [CATransaction generateSeed]);
-		} forPhase:kCATransactionPhasePreLayout];
-
+			NSLog(@"B");
+			preCommitReply = xpc_connection_send_message_with_reply_sync(peer, xpc_dictionary_create_reply(event));
+			NSLog(@"B.1");
+		} forPhase:kCATransactionPhasePreCommit];
 		[CATransaction addCommitHandler:^{
-			(void)event;
-			NSLog(@"%d -> PostCommit", [CATransaction generateSeed]);
-			mach_port_deallocate(mach_task_self(), remote_fence);
-			NSLog(@"%d <- PostCommit", [CATransaction generateSeed]);
+			NSLog(@"C");
+			(void)xpc_connection_send_message_with_reply_sync(peer, xpc_dictionary_create_reply(preCommitReply));
+			NSLog(@"C.1");
 		} forPhase:kCATransactionPhasePostCommit];
 
 		[view layoutSubtreeIfNeeded];

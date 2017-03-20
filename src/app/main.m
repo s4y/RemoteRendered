@@ -3,11 +3,6 @@
 #import "../spi/QuartzCore.h"
 #import "../spi/xpc.h"
 
-void print_refs(mach_port_t port) {
-	mach_port_urefs_t refs;
-	NSLog(@"refs (%x): %d\n", mach_port_get_refs(mach_task_self(), port, MACH_PORT_RIGHT_SEND, &refs), refs);
-}
-
 // Calls the passed block with an empty XPC dictionary, then returns that
 // dictionary. Just a concise way to build a message.
 static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
@@ -21,6 +16,7 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 
 @implementation RendererView {
 	xpc_connection_t _connection;
+	BOOL _inTransaction;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame connection:(xpc_connection_t)connection {
@@ -67,60 +63,30 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		return;
 	}
 
-	mach_port_t fence;
-	mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &fence);
-	mach_port_insert_right(mach_task_self(), fence, fence, MACH_MSG_TYPE_MAKE_SEND);
+	if (!_inTransaction) {
+		[CATransaction begin];
+	}
 
+	_inTransaction = YES;
 
-	mach_port_t remote_fence = MACH_PORT_NULL;
+	NSLog(@"begin");
 
-	xpc_object_t reply = xpc_connection_send_message_with_reply_sync(_connection, XPCDict(^(xpc_object_t m) {
+	xpc_connection_send_message_with_reply(_connection, XPCDict(^(xpc_object_t m) {
 		const NSSize size = self.frame.size;
 		xpc_dictionary_set_double(m, "width", size.width);
 		xpc_dictionary_set_double(m, "height", size.height);
-
-		// This fence lets the renderer delay the app's commit. The renderer is
-		// doing very little layout work in this example, but commenting out
-		// these lines and adding usleep(20000) near the bottom of the
-		// renderer's event handler effectively demonstrates the failure mode
-		// without this fence. CA fences have a ~1s timeout.
-		//mach_port_t fence = [context createFencePort];
-		xpc_dictionary_set_mach_send(m, "fence", fence);
-		mach_port_deallocate(mach_task_self(), fence);
-		NSLog(@"fence: %d", fence);
-		print_refs(fence);
-	}));
-	remote_fence = xpc_dictionary_copy_mach_send(reply, "fence");
-
-	[CATransaction addCommitHandler:^{
-		NSLog(@"fence: %d", fence);
-		print_refs(fence);
-		// When this PostCommit handler runs, the app has a fence with the
-		// window server (if you pause here in a debugger, you'll see the
-		// changes flush to the screen after the ~1s timeout). The renderer's
-		// CA fence is signaled here, and it updates in sync with the main
-		// process. Signal it earlier, it displays a frame *before* the main
-		// process. Signal it later, it'll be a frame behind. This took the
-		// longest to figure out, because CAContext has a -setFence: method
-		// that can accept a fence from another process, but it signals those
-		// fences just before the PreCommit phase, causing the remote content
-		// to update ahead of the main process.
-		//
-		// I'm not sure if that's a bug or just incomplete understanding of
-		// this API on my part, but it's worth noting that WebKit uses
-		// -setFence:, which explains why Safari window resizing is so glitchy,
-		// especially from the left edge.
-		//mach_port_deallocate(mach_task_self(), remote_fence);
-		//mach_port_deallocate(mach_task_self(), fence);
-		NSLog(@"%d -> PostCommit", [CATransaction generateSeed]);
-		mach_port_t previous;
-		mach_port_request_notification(mach_task_self(), fence, MACH_NOTIFY_NO_SENDERS, 0, fence, MACH_MSG_TYPE_MAKE_SEND_ONCE, &previous);
-		mach_port_deallocate(mach_task_self(), remote_fence);
-		mach_no_senders_notification_t msg = {0};
-		mach_msg(&msg.not_header, MACH_RCV_MSG, 0, sizeof(msg), fence, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
-		mach_port_destroy(mach_task_self(), fence);
-		NSLog(@"%d <- PostCommit", [CATransaction generateSeed]);
-	} forPhase:kCATransactionPhasePostCommit];
+	}), dispatch_get_main_queue(), ^(xpc_object_t reply){
+		NSLog(@"A");
+		[CATransaction addCommitHandler:^{
+			NSLog(@"B");
+			xpc_object_t ev = xpc_connection_send_message_with_reply_sync(_connection, xpc_dictionary_create_reply(reply));
+			xpc_connection_send_message(_connection, xpc_dictionary_create_reply(ev));
+			NSLog(@"B.1");
+			_inTransaction = NO;
+		} forPhase:kCATransactionPhasePostCommit];
+		NSLog(@"commit go");
+		[CATransaction commit];
+	});
 }
 
 @end
