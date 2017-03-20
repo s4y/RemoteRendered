@@ -3,6 +3,11 @@
 #import "../spi/QuartzCore.h"
 #import "../spi/xpc.h"
 
+void print_refs(mach_port_t port) {
+	mach_port_urefs_t refs;
+	NSLog(@"refs (%x): %d\n", mach_port_get_refs(mach_task_self(), port, MACH_PORT_RIGHT_SEND, &refs), refs);
+}
+
 // Calls the passed block with an empty XPC dictionary, then returns that
 // dictionary. Just a concise way to build a message.
 static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
@@ -66,8 +71,11 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 	mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &fence);
 	mach_port_insert_right(mach_task_self(), fence, fence, MACH_MSG_TYPE_MAKE_SEND);
 
-	const NSSize size = self.frame.size;
+
+	mach_port_t remote_fence = MACH_PORT_NULL;
+
 	xpc_object_t reply = xpc_connection_send_message_with_reply_sync(_connection, XPCDict(^(xpc_object_t m) {
+		const NSSize size = self.frame.size;
 		xpc_dictionary_set_double(m, "width", size.width);
 		xpc_dictionary_set_double(m, "height", size.height);
 
@@ -79,11 +87,14 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		//mach_port_t fence = [context createFencePort];
 		xpc_dictionary_set_mach_send(m, "fence", fence);
 		mach_port_deallocate(mach_task_self(), fence);
+		NSLog(@"fence: %d", fence);
+		print_refs(fence);
 	}));
-
-	mach_port_t remote_fence = xpc_dictionary_copy_mach_send(reply, "fence");
+	remote_fence = xpc_dictionary_copy_mach_send(reply, "fence");
 
 	[CATransaction addCommitHandler:^{
+		NSLog(@"fence: %d", fence);
+		print_refs(fence);
 		// When this PostCommit handler runs, the app has a fence with the
 		// window server (if you pause here in a debugger, you'll see the
 		// changes flush to the screen after the ~1s timeout). The renderer's

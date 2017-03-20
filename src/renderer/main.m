@@ -103,7 +103,6 @@ static void handle_connection(xpc_connection_t peer) {
 		} forPhase:kCATransactionPhasePostCommit];
 
 		[view layoutSubtreeIfNeeded];
-		[view displayIfNeeded];
 	});
 	xpc_connection_resume(peer);
 }
