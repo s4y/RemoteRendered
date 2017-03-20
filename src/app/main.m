@@ -72,7 +72,7 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 		// doing very little layout work in this example, but commenting out
 		// these lines and adding usleep(20000) near the bottom of the
 		// renderer's event handler effectively demonstrates the failure mode
-		// without this fence. CA fences have a ~1s timeout.
+		// without this fence.
 		mach_port_t fence = FenceForCATransactionPhase(kCATransactionPhasePostCommit);
 		xpc_dictionary_set_mach_send(m, "fence", fence);
 		mach_port_deallocate(mach_task_self(), fence);
@@ -81,21 +81,20 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 	mach_port_t remote_fence = xpc_dictionary_copy_mach_send(reply, "fence");
 
 	[CATransaction addCommitHandler:^{
-		// When this PostCommit handler runs, the app has a fence with the
-		// window server (if you pause here in a debugger, you'll see the
-		// changes flush to the screen after the ~1s timeout). The renderer's
-		// CA fence is signaled here, and it updates in sync with the main
-		// process. Signal it earlier, it displays a frame *before* the main
-		// process. Signal it later, it'll be a frame behind. This took the
-		// longest to figure out, because CAContext has a -setFence: method
-		// that can accept a fence from another process, but it signals those
-		// fences just before the PreCommit phase, causing the remote content
-		// to update ahead of the main process.
+		// When this PostCommit handler runs, the app has a fence with the window
+		// server (if you pause here in a debugger, you'll see the changes flush to
+		// the screen after a ~1s timeout). The renderer's CA fence is signaled
+		// here, and it updates in sync with the main process. Signal it earlier,
+		// it displays a frame *before* the main process. Signal it later, it'll be
+		// a frame behind. This took the longest to figure out, because CAContext
+		// has a -setFence: method that can accept a fence from another process,
+		// but it signals those fences just before the PreCommit phase, causing the
+		// remote content to update ahead of the main process.
 		//
-		// I'm not sure if that's a bug or just incomplete understanding of
-		// this API on my part, but it's worth noting that WebKit uses
-		// -setFence:, which explains why Safari window resizing is so glitchy,
-		// especially from the left edge.
+		// I'm not sure if that's a bug or just incomplete understanding of this
+		// API on my part, but it's worth noting that WebKit uses -setFence:, which
+		// explains why Safari window resizing is so glitchy, especially from the
+		// left edge.
 		mach_port_deallocate(mach_task_self(), remote_fence);
 	} forPhase:kCATransactionPhasePostCommit];
 }
@@ -104,9 +103,9 @@ static xpc_object_t XPCDict(void(^fill)(xpc_object_t)) {
 
 int main() {
 	NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(10, 10, 200, 200)
-												   styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskResizable
-													 backing:NSBackingStoreBuffered
-													   defer:NO];
+																								 styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskResizable
+																									 backing:NSBackingStoreBuffered
+																										 defer:NO];
 
 	xpc_connection_t c = xpc_connection_create("example.renderer", NULL);
 	RendererView* rendererView = [[RendererView alloc] initWithFrame:NSZeroRect connection:c];
